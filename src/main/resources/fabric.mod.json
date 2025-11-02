@@ -1,0 +1,44 @@
+{
+	"schemaVersion": 1,
+	"id": "automated-tree-harvesting",
+	"version": "${version}",
+	"name": "Automated tree harvesting",
+	"description": "This is a mod that automatically chops down trees.",
+	"authors": [
+		"chihalu"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "MIT",
+	"icon": "assets/automated-tree-harvesting/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"chihalu.automated.tree.harvesting.AutomatedTreeHarvesting"
+		],
+		"client": [
+			"chihalu.automated.tree.harvesting.AutomatedTreeHarvestingClient"
+		],
+		"fabric-datagen": [
+			"chihalu.automated.tree.harvesting.AutomatedTreeHarvestingDataGenerator"
+		]
+	},
+	"mixins": [
+		"automated-tree-harvesting.mixins.json",
+		{
+			"config": "automated-tree-harvesting.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.17.3",
+		"minecraft": "~1.21.9",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}

@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"package": "chihalu.automated.tree.harvesting.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"mixins": [
+		"ItemFrameEntityMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	},
+	"overwrites": {
+		"requireAnnotations": true
+	}
+}
