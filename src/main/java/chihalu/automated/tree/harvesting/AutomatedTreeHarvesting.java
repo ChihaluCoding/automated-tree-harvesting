@@ -32,5 +32,6 @@ public class AutomatedTreeHarvesting implements ModInitializer {
 				TreeHarvestManager.onFrameTick(world, frame);
 			}
 		});
+		TreeHarvestManager.tick(world);
 	}
 }

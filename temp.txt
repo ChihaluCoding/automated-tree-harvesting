@@ -2,24 +2,18 @@ package chihalu.automated.tree.harvesting.logic;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.HopperBlock;
 import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.HopperBlockEntity;
-import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.server.world.ServerWorld;
@@ -27,8 +21,6 @@ import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
 
 public final class TreeHarvestManager {
 	private static final int MAX_LOGS = 512;
@@ -36,28 +28,8 @@ public final class TreeHarvestManager {
 	private static final int HORIZONTAL_RADIUS = 6;
 	private static final int VERTICAL_BELOW = 4;
 	private static final int VERTICAL_ABOVE = 32;
-	private static final long REPLANT_DELAY_TICKS = 200L;
-	private static final Map<PendingKey, PendingPlant> PENDING_PLANTS = new HashMap<>();
 
 	private TreeHarvestManager() {
-	}
-
-	private record PendingKey(RegistryKey<World> worldKey, BlockPos pos) {
-		private boolean matches(ServerWorld world) {
-			return world.getRegistryKey().equals(worldKey);
-		}
-	}
-
-	private static final class PendingPlant {
-		private final BlockState saplingState;
-		private final BlockState belowState;
-		private final long createdTick;
-
-		private PendingPlant(BlockState saplingState, BlockState belowState, long createdTick) {
-			this.saplingState = saplingState;
-			this.belowState = belowState;
-			this.createdTick = createdTick;
-		}
 	}
 
 	public static void onFrameTick(ServerWorld world, ItemFrameEntity frame) {
@@ -274,31 +246,20 @@ public final class TreeHarvestManager {
 			if (anchor == null) {
 				return;
 			}
-
-			BlockPos east = anchor.add(1, 0, 0);
-			BlockPos south = anchor.add(0, 0, 1);
-			BlockPos southEast = anchor.add(1, 0, 1);
-
-			BlockState anchorBelow = world.getBlockState(anchor.down());
-			BlockState eastBelow = world.getBlockState(east.down());
-			BlockState southBelow = world.getBlockState(south.down());
-			BlockState southEastBelow = world.getBlockState(southEast.down());
-
 			if (canPlaceSapling(world, anchor, saplingState)
-				&& canPlaceSapling(world, east, saplingState)
-				&& canPlaceSapling(world, south, saplingState)
-				&& canPlaceSapling(world, southEast, saplingState)) {
-				schedulePlant(world, anchor, saplingState, anchorBelow);
-				schedulePlant(world, east, saplingState, eastBelow);
-				schedulePlant(world, south, saplingState, southBelow);
-				schedulePlant(world, southEast, saplingState, southEastBelow);
+				&& canPlaceSapling(world, anchor.add(1, 0, 0), saplingState)
+				&& canPlaceSapling(world, anchor.add(0, 0, 1), saplingState)
+				&& canPlaceSapling(world, anchor.add(1, 0, 1), saplingState)) {
+				world.setBlockState(anchor, saplingState, Block.NOTIFY_ALL);
+				world.setBlockState(anchor.add(1, 0, 0), saplingState, Block.NOTIFY_ALL);
+				world.setBlockState(anchor.add(0, 0, 1), saplingState, Block.NOTIFY_ALL);
+				world.setBlockState(anchor.add(1, 0, 1), saplingState, Block.NOTIFY_ALL);
 			}
 			return;
 		}
 
 		if (canPlaceSapling(world, base, saplingState)) {
-			BlockState belowState = world.getBlockState(base.down());
-			schedulePlant(world, base, saplingState, belowState);
+			world.setBlockState(base, saplingState, Block.NOTIFY_ALL);
 		}
 	}
 
@@ -353,23 +314,6 @@ public final class TreeHarvestManager {
 		return null;
 	}
 
-	private static void schedulePlant(ServerWorld world, BlockPos pos, BlockState saplingState, BlockState belowState) {
-		PendingKey key = new PendingKey(world.getRegistryKey(), pos.toImmutable());
-		if (PENDING_PLANTS.containsKey(key)) {
-			return;
-		}
-
-		BlockPos hopperPos = pos.down();
-		world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-
-		if (!world.getBlockState(hopperPos).isOf(Blocks.HOPPER)) {
-			BlockState hopperState = Blocks.HOPPER.getDefaultState().with(HopperBlock.FACING, Direction.DOWN);
-			world.setBlockState(hopperPos, hopperState, Block.NOTIFY_ALL);
-		}
-
-		PENDING_PLANTS.put(key, new PendingPlant(saplingState, belowState, world.getTime()));
-	}
-
 	private static boolean canPlaceSapling(ServerWorld world, BlockPos pos, BlockState saplingState) {
 		if (!world.isAir(pos)) {
 			return false;
@@ -377,132 +321,8 @@ public final class TreeHarvestManager {
 		return saplingState.canPlaceAt(world, pos);
 	}
 
-	private static boolean hasItemsOnColumn(ServerWorld world, BlockPos soilPos) {
-		double minX = soilPos.getX() + 0.05;
-		double minZ = soilPos.getZ() + 0.05;
-		double maxX = soilPos.getX() + 0.95;
-		double maxZ = soilPos.getZ() + 0.95;
-		double minY = soilPos.getY();
-		double maxY = soilPos.getY() + 1.5;
-
-		Box columnBox = new Box(minX, minY, minZ, maxX, maxY, maxZ);
-		return !world.getEntitiesByClass(
-			ItemEntity.class,
-			columnBox,
-			item -> !item.isRemoved()
-		).isEmpty();
-	}
-
-	private static boolean isLowerChainReady(ServerWorld world, BlockPos startHopperPos) {
-		BlockPos current = startHopperPos.down();
-		int depth = 0;
-		while (depth < 8) {
-			BlockState state = world.getBlockState(current);
-			if (!state.isOf(Blocks.HOPPER)) {
-				return true;
-			}
-
-			BlockEntity blockEntity = world.getBlockEntity(current);
-			if (!(blockEntity instanceof HopperBlockEntity hopper)) {
-				return false;
-			}
-
-			boolean changed = HopperBlockEntity.extract(world, hopper);
-			List<ItemEntity> aboveItems = HopperBlockEntity.getInputItemEntities(world, hopper);
-			for (ItemEntity item : aboveItems) {
-				if (item.isRemoved()) {
-					continue;
-				}
-				if (HopperBlockEntity.extract(hopper, item)) {
-					changed = true;
-				}
-			}
-			if (changed) {
-				HopperBlockEntity.extract(world, hopper);
-			}
-
-			if (!hopper.isEmpty() || hasItemsOnColumn(world, current.up())) {
-				return false;
-			}
-
-			current = current.down();
-			depth++;
-		}
-		return true;
-	}
-
 	private static boolean withinRadius(BlockPos center, BlockPos pos, int radius) {
 		return Math.abs(pos.getX() - center.getX()) <= radius
 			&& Math.abs(pos.getZ() - center.getZ()) <= radius;
-	}
-
-	public static void tick(ServerWorld world) {
-		Iterator<Map.Entry<PendingKey, PendingPlant>> iterator = PENDING_PLANTS.entrySet().iterator();
-		while (iterator.hasNext()) {
-			Map.Entry<PendingKey, PendingPlant> entry = iterator.next();
-			PendingKey key = entry.getKey();
-			PendingPlant pending = entry.getValue();
-			if (!key.matches(world)) {
-				continue;
-			}
-
-			if (world.getTime() - pending.createdTick < REPLANT_DELAY_TICKS) {
-				continue;
-			}
-
-			BlockPos soilPos = key.pos();
-			BlockPos hopperPos = soilPos.down();
-
-			if (!world.getBlockState(soilPos).isAir()) {
-				iterator.remove();
-				continue;
-			}
-
-			BlockState hopperState = world.getBlockState(hopperPos);
-			if (!hopperState.isOf(Blocks.HOPPER)) {
-				iterator.remove();
-				continue;
-			}
-
-			BlockEntity blockEntity = world.getBlockEntity(hopperPos);
-			if (!(blockEntity instanceof HopperBlockEntity hopper)) {
-				world.setBlockState(hopperPos, pending.belowState, Block.NOTIFY_ALL);
-				iterator.remove();
-				continue;
-			}
-
-			boolean changed = false;
-			if (HopperBlockEntity.extract(world, hopper)) {
-				changed = true;
-			}
-
-			List<ItemEntity> aboveItems = HopperBlockEntity.getInputItemEntities(world, hopper);
-			for (ItemEntity item : aboveItems) {
-				if (item.isRemoved()) {
-					continue;
-				}
-				if (HopperBlockEntity.extract(hopper, item)) {
-					changed = true;
-				}
-			}
-			if (changed) {
-				HopperBlockEntity.extract(world, hopper);
-			}
-
-			boolean itemsRemainAbove = hasItemsOnColumn(world, soilPos);
-			if (!hopper.isEmpty() || itemsRemainAbove || !isLowerChainReady(world, hopperPos)) {
-				continue;
-			}
-
-			HopperBlockEntity.extract(world, hopper);
-			BlockState storedBelow = pending.belowState;
-			world.setBlockState(hopperPos, storedBelow, Block.NOTIFY_ALL);
-			if (pending.saplingState.canPlaceAt(world, soilPos)) {
-				world.setBlockState(soilPos, pending.saplingState, Block.NOTIFY_ALL);
-			} else {
-				Block.dropStack(world, soilPos, new ItemStack(pending.saplingState.getBlock()));
-			}
-			iterator.remove();
-		}
 	}
 }
