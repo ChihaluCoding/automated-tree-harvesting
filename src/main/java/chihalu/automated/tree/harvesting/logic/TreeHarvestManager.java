@@ -1,6 +1,7 @@
 package chihalu.automated.tree.harvesting.logic;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -20,11 +21,15 @@ import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.registry.tag.TagKey;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
@@ -38,6 +43,8 @@ public final class TreeHarvestManager {
 	private static final int VERTICAL_ABOVE = 32;
 	private static final long REPLANT_DELAY_TICKS = 200L;
 	private static final Map<PendingKey, PendingPlant> PENDING_PLANTS = new HashMap<>();
+	private static final TagKey<Block> PALE_OAK_LOGS_TAG = TagKey.of(RegistryKeys.BLOCK, Identifier.of("minecraft", "pale_oak_logs"));
+	private static final Identifier PALE_OAK_SAPLING_ID = Identifier.of("minecraft", "pale_oak_sapling");
 
 	private TreeHarvestManager() {
 	}
@@ -81,8 +88,8 @@ public final class TreeHarvestManager {
 		Set<BlockPos> leaves = collectLeaves(world, logs, base);
 		ItemStack leafTool = shears.isEmpty() ? ItemStack.EMPTY : shears;
 
-		boolean harvestedLogs = breakBlocks(world, logs, tool, frame);
-		boolean harvestedLeaves = !leaves.isEmpty() && breakBlocks(world, leaves, leafTool, frame);
+		boolean harvestedLogs = breakBlocks(world, logs, tool, frame, base);
+		boolean harvestedLeaves = !leaves.isEmpty() && breakBlocks(world, leaves, leafTool, frame, base);
 
 		if (harvestedLogs) {
 			tryReplantSapling(world, base, baseState, logs);
@@ -244,8 +251,15 @@ public final class TreeHarvestManager {
 		return frames.isEmpty() ? ItemStack.EMPTY : frames.get(0).getHeldItemStack();
 	}
 
-	private static boolean breakBlocks(ServerWorld world, Set<BlockPos> positions, ItemStack tool, ItemFrameEntity frame) {
+	private static boolean breakBlocks(
+		ServerWorld world,
+		Set<BlockPos> positions,
+		ItemStack tool,
+		ItemFrameEntity frame,
+		BlockPos dropTarget
+	) {
 		boolean brokeAny = false;
+		List<ItemStack> collectedDrops = new ArrayList<>();
 
 		for (BlockPos pos : positions) {
 			BlockState state = world.getBlockState(pos);
@@ -254,13 +268,43 @@ public final class TreeHarvestManager {
 			}
 
 			BlockEntity blockEntity = world.getBlockEntity(pos);
-			Block.dropStacks(state, world, pos, blockEntity, frame, tool);
+			List<ItemStack> drops = Block.getDroppedStacks(state, world, pos, blockEntity, frame, tool);
+			for (ItemStack drop : drops) {
+				if (!drop.isEmpty()) {
+					collectedDrops.add(drop.copy());
+				}
+			}
+			state.onStacksDropped(world, pos, tool, true);
 			world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
 			world.syncWorldEvent(null, 2001, pos, Block.getRawIdFromState(state));
 			brokeAny = true;
 		}
 
+		if (brokeAny) {
+			spawnCollectedDrops(world, dropTarget, collectedDrops);
+		}
+
 		return brokeAny;
+	}
+
+	private static void spawnCollectedDrops(ServerWorld world, BlockPos dropTarget, List<ItemStack> drops) {
+		if (dropTarget == null || drops.isEmpty()) {
+			return;
+		}
+
+		double x = dropTarget.getX() + 0.5D;
+		double y = dropTarget.getY() + 0.25D;
+		double z = dropTarget.getZ() + 0.5D;
+
+		for (ItemStack stack : drops) {
+			if (stack.isEmpty()) {
+				continue;
+			}
+			ItemEntity item = new ItemEntity(world, x, y, z, stack.copy());
+			item.setVelocity(0.0D, 0.0D, 0.0D);
+			item.setToDefaultPickupDelay();
+			world.spawnEntity(item);
+		}
 	}
 
 	private static void tryReplantSapling(ServerWorld world, BlockPos base, BlockState baseState, Set<BlockPos> logs) {
@@ -324,8 +368,9 @@ public final class TreeHarvestManager {
 		if (logState.isIn(BlockTags.CHERRY_LOGS)) {
 			return Blocks.CHERRY_SAPLING.getDefaultState();
 		}
-		if (logState.isIn(BlockTags.PALE_OAK_LOGS)) {
-			return Blocks.PALE_OAK_SAPLING.getDefaultState();
+		BlockState paleOakSapling = getOptionalPaleOakSapling();
+		if (paleOakSapling != null && isPaleOakLog(logState)) {
+			return paleOakSapling;
 		}
 		return null;
 	}
@@ -334,7 +379,19 @@ public final class TreeHarvestManager {
 		return logState.isIn(BlockTags.DARK_OAK_LOGS)
 			|| logState.isIn(BlockTags.SPRUCE_LOGS)
 			|| logState.isIn(BlockTags.JUNGLE_LOGS)
-			|| logState.isIn(BlockTags.PALE_OAK_LOGS);
+			|| isPaleOakLog(logState);
+	}
+
+	private static boolean isPaleOakLog(BlockState state) {
+		return state.isIn(PALE_OAK_LOGS_TAG);
+	}
+
+	private static BlockState getOptionalPaleOakSapling() {
+		if (!Registries.BLOCK.getIds().contains(PALE_OAK_SAPLING_ID)) {
+			return null;
+		}
+		Block block = Registries.BLOCK.get(PALE_OAK_SAPLING_ID);
+		return block == Blocks.AIR ? null : block.getDefaultState();
 	}
 
 	private static BlockPos findTwoByTwoAnchor(Set<BlockPos> logs, BlockPos base) {
