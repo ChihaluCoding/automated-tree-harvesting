@@ -103,10 +103,9 @@ public final class TreeHarvestManager {
 		BlockState baseState = world.getBlockState(base);
 		ItemStack shears = findShears(world, frame);
 		Set<BlockPos> leaves = collectLeaves(world, logs, base);
-		ItemStack leafTool = shears.isEmpty() ? ItemStack.EMPTY : shears;
 
 		boolean harvestedLogs = breakBlocks(world, logs, tool, frame, base);
-		boolean harvestedLeaves = !leaves.isEmpty() && breakBlocks(world, leaves, leafTool, frame, base);
+		boolean harvestedLeaves = !leaves.isEmpty() && breakLeaves(world, leaves, tool, shears, frame, base);
 
 		if (harvestedLogs) {
 			tryReplantSapling(world, base, baseState, logs);
@@ -278,6 +277,8 @@ public final class TreeHarvestManager {
 		boolean brokeAny = false;
 		List<ItemStack> collectedDrops = new ArrayList<>();
 
+		ItemStack dropTool = tool.isEmpty() ? ItemStack.EMPTY : tool.copy();
+
 		for (BlockPos pos : positions) {
 			BlockState state = world.getBlockState(pos);
 			if (state.isAir()) {
@@ -285,13 +286,13 @@ public final class TreeHarvestManager {
 			}
 
 			BlockEntity blockEntity = world.getBlockEntity(pos);
-			List<ItemStack> drops = Block.getDroppedStacks(state, world, pos, blockEntity, frame, tool);
+			List<ItemStack> drops = Block.getDroppedStacks(state, world, pos, blockEntity, frame, dropTool);
 			for (ItemStack drop : drops) {
 				if (!drop.isEmpty()) {
 					collectedDrops.add(drop.copy());
 				}
 			}
-			state.onStacksDropped(world, pos, tool, true);
+			state.onStacksDropped(world, pos, dropTool, true);
 			world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
 			world.syncWorldEvent(null, 2001, pos, Block.getRawIdFromState(state));
 			brokeAny = true;
@@ -322,6 +323,60 @@ public final class TreeHarvestManager {
 			item.setToDefaultPickupDelay();
 			world.spawnEntity(item);
 		}
+	}
+
+	private static boolean breakLeaves(
+		ServerWorld world,
+		Set<BlockPos> positions,
+		ItemStack axe,
+		ItemStack shears,
+		ItemFrameEntity frame,
+		BlockPos dropTarget
+	) {
+		if (positions.isEmpty()) {
+			return false;
+		}
+
+		ItemStack fortuneTool = axe.isEmpty() ? ItemStack.EMPTY : axe.copy();
+		ItemStack shearsTool = shears.isEmpty() ? ItemStack.EMPTY : shears.copy();
+		boolean shearsAvailable = !shearsTool.isEmpty();
+
+		boolean brokeAny = false;
+		boolean hasSapling = false;
+		List<ItemStack> collectedDrops = new ArrayList<>();
+
+		for (BlockPos pos : positions) {
+			BlockState state = world.getBlockState(pos);
+			if (state.isAir()) {
+				continue;
+			}
+
+			ItemStack chosenTool = (!shearsAvailable || !hasSapling) ? fortuneTool : shearsTool;
+			ItemStack toolForDrops = chosenTool.isEmpty() ? ItemStack.EMPTY : chosenTool.copy();
+
+			BlockEntity blockEntity = world.getBlockEntity(pos);
+			List<ItemStack> drops = Block.getDroppedStacks(state, world, pos, blockEntity, frame, toolForDrops);
+			for (ItemStack drop : drops) {
+				if (drop.isEmpty()) {
+					continue;
+				}
+				collectedDrops.add(drop.copy());
+				if (!hasSapling && drop.isIn(ItemTags.SAPLINGS)) {
+					hasSapling = true;
+				}
+			}
+
+			state.onStacksDropped(world, pos, toolForDrops, true);
+			world.setBlockState(pos, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+			world.syncWorldEvent(null, 2001, pos, Block.getRawIdFromState(state));
+			brokeAny = true;
+		}
+
+		if (brokeAny) {
+			spawnCollectedDrops(world, dropTarget, collectedDrops);
+		}
+
+		return brokeAny;
 	}
 
 	private static void tryReplantSapling(ServerWorld world, BlockPos base, BlockState baseState, Set<BlockPos> logs) {
