@@ -43,6 +43,7 @@ public final class TreeHarvestManager {
 	private static final int VERTICAL_ABOVE = 32;
 	private static final long REPLANT_DELAY_TICKS = 200L;
 	private static final Map<PendingKey, PendingPlant> PENDING_PLANTS = new HashMap<>();
+	private static final Set<RegistryKey<World>> SYNCED_WORLDS = new HashSet<>();
 	private static final TagKey<Block> PALE_OAK_LOGS_TAG = TagKey.of(RegistryKeys.BLOCK, Identifier.of("minecraft", "pale_oak_logs"));
 	private static final Identifier PALE_OAK_SAPLING_ID = Identifier.of("minecraft", "pale_oak_sapling");
 
@@ -65,6 +66,22 @@ public final class TreeHarvestManager {
 			this.belowState = belowState;
 			this.createdTick = createdTick;
 		}
+	}
+
+	private static void loadPendingFromStorage(ServerWorld world) {
+		if (!SYNCED_WORLDS.add(world.getRegistryKey())) {
+			return;
+		}
+		PendingPlantStorage storage = PendingPlantStorage.get(world);
+		storage.forEachLoaded(world, (pos, saplingState, belowState, createdTick) -> {
+			PendingKey key = new PendingKey(world.getRegistryKey(), pos.toImmutable());
+			PENDING_PLANTS.computeIfAbsent(key, ignored -> new PendingPlant(saplingState, belowState, createdTick));
+		});
+	}
+
+	private static void removePendingEntry(Iterator<Map.Entry<PendingKey, PendingPlant>> iterator, ServerWorld world, PendingKey key) {
+		iterator.remove();
+		PendingPlantStorage.get(world).remove(key.pos());
 	}
 
 	public static void onFrameTick(ServerWorld world, ItemFrameEntity frame) {
@@ -424,7 +441,9 @@ public final class TreeHarvestManager {
 			world.setBlockState(hopperPos, hopperState, Block.NOTIFY_ALL);
 		}
 
-		PENDING_PLANTS.put(key, new PendingPlant(saplingState, belowState, world.getTime()));
+		long createdTick = world.getTime();
+		PENDING_PLANTS.put(key, new PendingPlant(saplingState, belowState, createdTick));
+		PendingPlantStorage.get(world).put(pos, saplingState, belowState, createdTick);
 	}
 
 	private static boolean canPlaceSapling(ServerWorld world, BlockPos pos, BlockState saplingState) {
@@ -494,6 +513,7 @@ public final class TreeHarvestManager {
 	}
 
 	public static void tick(ServerWorld world) {
+		loadPendingFromStorage(world);
 		Iterator<Map.Entry<PendingKey, PendingPlant>> iterator = PENDING_PLANTS.entrySet().iterator();
 		while (iterator.hasNext()) {
 			Map.Entry<PendingKey, PendingPlant> entry = iterator.next();
@@ -511,20 +531,20 @@ public final class TreeHarvestManager {
 			BlockPos hopperPos = soilPos.down();
 
 			if (!world.getBlockState(soilPos).isAir()) {
-				iterator.remove();
+				removePendingEntry(iterator, world, key);
 				continue;
 			}
 
 			BlockState hopperState = world.getBlockState(hopperPos);
 			if (!hopperState.isOf(Blocks.HOPPER)) {
-				iterator.remove();
+				removePendingEntry(iterator, world, key);
 				continue;
 			}
 
 			BlockEntity blockEntity = world.getBlockEntity(hopperPos);
 			if (!(blockEntity instanceof HopperBlockEntity hopper)) {
 				world.setBlockState(hopperPos, pending.belowState, Block.NOTIFY_ALL);
-				iterator.remove();
+				removePendingEntry(iterator, world, key);
 				continue;
 			}
 
@@ -559,7 +579,7 @@ public final class TreeHarvestManager {
 			} else {
 				Block.dropStack(world, soilPos, new ItemStack(pending.saplingState.getBlock()));
 			}
-			iterator.remove();
+			removePendingEntry(iterator, world, key);
 		}
 	}
 }
